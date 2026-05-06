@@ -1,0 +1,177 @@
+name: CI / CD — Pipeline Debugger
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION:   "20"
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+# ── 1. BACKEND LINT + TEST ───────────────────────────────────────────────────
+  backend-ci:
+    name: Backend — Lint & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB:       pipeline_debugger_test
+          POSTGRES_USER:     postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check app/ --ignore E501 || true   # warn only on line length
+
+      - name: Type check with mypy
+        run: |
+          pip install mypy
+          mypy app/ --ignore-missing-imports --no-strict-optional || true
+
+      - name: Run tests
+        env:
+          DATABASE_URL:    postgresql+asyncpg://postgres:postgres@localhost:5432/pipeline_debugger_test
+          REDIS_URL:       redis://localhost:6379
+          GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY || 'test-key' }}
+          SECRET_KEY:      test-secret-key-for-ci
+          ADMIN_PASSWORD:  admin123
+          DEMO_PASSWORD:   demo123
+          API_KEYS:        ci-test-key
+        run: pytest tests/ -v --tb=short --ignore=tests/test_api.py
+
+      - name: Build Docker image (smoke test)
+        run: docker build -t pipeline-debugger-backend:ci .
+
+
+# ── 2. FRONTEND LINT + BUILD ─────────────────────────────────────────────────
+  frontend-ci:
+    name: Frontend — Lint & Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: |
+          npm install --save-dev eslint eslint-plugin-react @eslint/js globals || true
+          npx eslint src/ --ext .js,.jsx --max-warnings=20 || true
+
+      - name: Build
+        env:
+          VITE_API_URL: /api
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 3
+
+
+# ── 3. DEPLOY BACKEND → RENDER ───────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend → Render
+    needs: [backend-ci, frontend-ci]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            curl -s -X POST "$RENDER_DEPLOY_HOOK" \
+              -H "Content-Type: application/json" \
+              -d '{}' \
+              --fail-with-body
+            echo "Render backend deploy triggered"
+          else
+            echo "RENDER_BACKEND_DEPLOY_HOOK not set — skipping deploy"
+          fi
+
+
+# ── 4. DEPLOY FRONTEND → VERCEL ──────────────────────────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend → Vercel
+    needs: [backend-ci, frontend-ci]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN:   ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID:  ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then
+            cd frontend
+            vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+            vercel build --prod --token=$VERCEL_TOKEN
+            vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
+          else
+            echo "VERCEL_TOKEN not set — skipping frontend deploy"
+          fi

@@ -15,6 +15,7 @@ export default function LoginPage() {
     try {
       const data = await apiLogin(form.username, form.password);
       login(data);
+      window.location.reload();
     } catch (err) {
       setError(err.message || "Login failed");
     } finally {

@@ -3,15 +3,7 @@ services/db.py — Async SQLAlchemy models + CRUD for:
   - DebugResult    (pipeline debug sessions)
   - FeedbackEntry  (user feedback / eval metrics)
 """
-class User(Base):
-    __tablename__ = "users"
 
-    id:              Mapped[int]  = mapped_column(primary_key=True)
-    username:        Mapped[str]  = mapped_column(String(100), unique=True, index=True)
-    hashed_password: Mapped[str]  = mapped_column(String(255))
-    role:            Mapped[str]  = mapped_column(String(50), default="user")
-    disabled:        Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at:      Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 from __future__ import annotations
 
 import json
@@ -36,7 +28,15 @@ AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=F
 
 class Base(DeclarativeBase):
     pass
+class User(Base):
+    __tablename__ = "users"
 
+    id:              Mapped[int]  = mapped_column(primary_key=True)
+    username:        Mapped[str]  = mapped_column(String(100), unique=True, index=True)
+    hashed_password: Mapped[str]  = mapped_column(String(255))
+    role:            Mapped[str]  = mapped_column(String(50), default="user")
+    disabled:        Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at:      Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class DebugResult(Base):
     __tablename__ = "debug_results"

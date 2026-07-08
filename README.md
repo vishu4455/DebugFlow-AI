@@ -161,7 +161,7 @@ pipeline-debugger/
 
 - ✅ 4-agent agentic pipeline (Log Fetch → Metadata → Classify → Dependencies → Fix)
 - ✅ Parallel agent execution (metadata + classification run concurrently)
-- ✅ Gemini 1.5 Flash with enforced JSON output (`response_mime_type`)
+- ✅ Gemini 2.5 Flash with enforced JSON output (`response_mime_type`)
 - ✅ Retry logic with exponential backoff (tenacity)
 - ✅ Redis LLM response caching (5-min TTL)
 - ✅ Postgres result persistence

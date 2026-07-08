@@ -16,7 +16,7 @@ Orchestrator (async, parallel agents)
     ├── Dependency Agent  → Blast radius, upstream/downstream
     └── Fix Agent         → Steps, validation, rollback plan
          ↓
-    Gemini 1.5 Flash (JSON-enforced output)
+    Gemini 2.5 Flash (JSON-enforced output)
          ↓
     Redis (LLM response cache) + Postgres (result history)
 ```
